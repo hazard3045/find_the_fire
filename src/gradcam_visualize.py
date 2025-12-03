@@ -1,10 +1,3 @@
-"""
-Grad-CAM Visualization for Fire Detection Model
-
-This script generates heatmaps showing which pixels the model focuses on
-when classifying images as fire or no-fire.
-"""
-
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
@@ -23,30 +16,29 @@ from Network import Net
 MODEL_PATH = 'best_model.pth'  # or 'final_model.pth'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Image preprocessing - same as training
+# Image preprocessing 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 
-# For visualization, we need the unnormalized version
+# dénormaliser les images pour la visualisation
 def preprocess_image(img_path):
     """Load and preprocess image for both model input and visualization."""
     img = Image.open(img_path).convert('RGB')
     img_resized = img.resize((224, 224))
     
-    # For visualization (0-1 range)
+    # For visualization 
     img_array = np.array(img_resized) / 255.0
     
-    # For model input (normalized)
+    # For model input 
     img_tensor = transform(img_resized).unsqueeze(0)
     
     return img_tensor, img_array
 
 
 def load_model(model_path):
-    """Load the trained model."""
     model = Net()
     model.fc3 = torch.nn.Linear(in_features=84, out_features=2)
     
@@ -74,10 +66,9 @@ def generate_gradcam(model, img_tensor, img_array, target_class=None, save_path=
         target_class: Class to visualize (0=fire, 1=nofire). If None, uses predicted class.
         save_path: Path to save the visualization. If None, displays instead.
     """
-    # Select the target layer (last convolutional layer)
+    # la dernière couche de conv !!
     target_layers = [model.conv2]
     
-    # Create GradCAM object
     cam = GradCAM(model=model, target_layers=target_layers)
     
     # Get prediction
@@ -96,7 +87,7 @@ def generate_gradcam(model, img_tensor, img_array, target_class=None, save_path=
     grayscale_cam = cam(input_tensor=img_tensor.to(DEVICE), targets=targets)
     grayscale_cam = grayscale_cam[0, :]
     
-    # Overlay CAM on image
+    # supperpose le cam sur l'image
     visualization = show_cam_on_image(img_array, grayscale_cam, use_rgb=True)
     
     # Create figure with original image, heatmap, and overlay
@@ -104,18 +95,23 @@ def generate_gradcam(model, img_tensor, img_array, target_class=None, save_path=
     
     # Original image
     axes[0].imshow(img_array)
-    axes[0].set_title('Original Image')
+    axes[0].set_title('Original Image', fontsize=12, fontweight='bold')
     axes[0].axis('off')
     
-    # Heatmap only
-    axes[1].imshow(grayscale_cam, cmap='jet')
-    axes[1].set_title('Grad-CAM Heatmap')
+    # Heatmap only with colorbar
+    im = axes[1].imshow(grayscale_cam, cmap='jet')
+    axes[1].set_title('Grad-CAM Heatmap\n(Rouge = Important, Bleu = Peu important)', 
+                      fontsize=12, fontweight='bold')
     axes[1].axis('off')
+    # Add colorbar to show scale
+    cbar = plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
+    cbar.set_label('Importance', rotation=270, labelpad=15)
     
     # Overlay
     axes[2].imshow(visualization)
     class_names = ['Fire', 'No Fire']
-    axes[2].set_title(f'Overlay\nPredicted: {class_names[predicted_class]} ({confidence:.2%})')
+    axes[2].set_title(f'Overlay\nPredicted: {class_names[predicted_class]} ({confidence:.2%})', 
+                      fontsize=12, fontweight='bold')
     axes[2].axis('off')
     
     plt.tight_layout()
@@ -207,38 +203,38 @@ def main():
         batch_process_directory(model, args.dir, args.output)
         
     else:
-        # Demo mode: process sample images from dataset
-        print("\nDemo mode: Processing sample images from dataset...")
+        # Demo mode: process sample FIRE images only from dataset
+        print("\nDemo mode: Processing FIRE images only from dataset...")
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         dataset_dir = os.path.join(base_dir, 'corrected_wildfires_dataset')
         
-        # Process a few fire and nofire samples
-        for class_name in ['fire', 'nofire']:
-            class_dir = os.path.join(dataset_dir, class_name)
-            if os.path.exists(class_dir):
-                output_dir = os.path.join('gradcam_output', class_name)
-                os.makedirs(output_dir, exist_ok=True)
+        # Process only fire samples (not nofire)
+        class_name = 'fire'
+        class_dir = os.path.join(dataset_dir, class_name)
+        if os.path.exists(class_dir):
+            output_dir = os.path.join('gradcam_output', class_name)
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Get first 5 images
+            images = [f for f in os.listdir(class_dir) 
+                     if f.lower().endswith(('.jpg', '.jpeg', '.png'))][:5]
+            
+            print(f"\nProcessing {len(images)} {class_name} samples...")
+            for img_file in images:
+                img_path = os.path.join(class_dir, img_file)
+                output_path = os.path.join(output_dir, f"gradcam_{img_file}")
                 
-                # Get first 5 images
-                images = [f for f in os.listdir(class_dir) 
-                         if f.lower().endswith(('.jpg', '.jpeg', '.png'))][:5]
-                
-                print(f"\nProcessing {len(images)} {class_name} samples...")
-                for img_file in images:
-                    img_path = os.path.join(class_dir, img_file)
-                    output_path = os.path.join(output_dir, f"gradcam_{img_file}")
-                    
-                    try:
-                        img_tensor, img_array = preprocess_image(img_path)
-                        predicted_class, confidence, _ = generate_gradcam(
-                            model, img_tensor, img_array, save_path=output_path
-                        )
-                        class_names = ['Fire', 'No Fire']
-                        print(f"  {img_file}: {class_names[predicted_class]} ({confidence:.2%})")
-                    except Exception as e:
-                        print(f"  ⚠️  Error: {e}")
+                try:
+                    img_tensor, img_array = preprocess_image(img_path)
+                    predicted_class, confidence, _ = generate_gradcam(
+                        model, img_tensor, img_array, save_path=output_path
+                    )
+                    class_names = ['Fire', 'No Fire']
+                    print(f"  {img_file}: {class_names[predicted_class]} ({confidence:.2%})")
+                except Exception as e:
+                    print(f"  ⚠️  Error: {e}")
         
-        print("\n✓ Demo complete! Check gradcam_output/ directory for results.")
+        print("\n✓ Demo complete! Check gradcam_output/fire/ directory for results.")
 
 
 if __name__ == "__main__":

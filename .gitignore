@@ -1,2 +1,27 @@
+# Python environments
 env_forest_fire/
+venv/
+.venv/
+
+# Dataset
 corrected_wildfires_dataset/
+
+# Model files (too large for git)
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Grad-CAM output
+gradcam_output/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

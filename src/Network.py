@@ -18,39 +18,6 @@ class LimitImageSize:
         return img
 
 
-transform = transforms.Compose([
-    LimitImageSize(max_size=3000),
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),  # convertit [0,255] en [0,1]
-    transforms.Normalize(mean=[0.5, 0.5, 0.5],
-                         std=[0.5, 0.5, 0.5])
-])
-
-# Chemin vers le dataset
-
-dataset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'corrected_wildfires_dataset')
-
-# Chargement du dataset avec ImageFolder
-dataset = torchvision.datasets.ImageFolder(root=dataset_path, transform=transform)
-
-# Création du DataLoader
-
-# Séparation du dataset en train et test
-train_size = int(0.8 * len(dataset))
-test_size = len(dataset) - train_size
-train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-
-# DataLoaders pour train et test
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=False)
-
-dataiter = iter(train_loader)
-images, labels = next(dataiter)
-
-
-dataiter = iter(train_loader)
-images, labels = next(dataiter)
-
 class Net(nn.Module):
 
     def __init__(self):
@@ -88,43 +55,68 @@ class Net(nn.Module):
         return num_features
 
 
-net = Net()
-out = net(images)
+if __name__ == "__main__":
+    # Ce code ne s'exécute que si le fichier est lancé directement
+    # (pas lors de l'import dans train.py)
+    
+    transform = transforms.Compose([
+        LimitImageSize(max_size=3000),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                           std=[0.5, 0.5, 0.5])
+    ])
 
-# Entraînement du réseau
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-net = net.to(device)
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
-epochs = 5
+    dataset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'corrected_wildfires_dataset')
+    dataset = torchvision.datasets.ImageFolder(root=dataset_path, transform=transform)
 
-for epoch in range(epochs):
-    net.train()
-    running_loss = 0.0
-    for batch_idx, (inputs, targets) in enumerate(train_loader):
-        inputs, targets = inputs.to(device), targets.to(device)
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-        running_loss += loss.item() * inputs.size(0)
-        print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx+1}/{len(train_loader)} | Loss: {loss.item():.4f}")
-    epoch_loss = running_loss / len(train_loader.dataset)
-    print(f"[Epoch {epoch+1}] Loss moyen: {epoch_loss:.4f}")
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
 
-# Évaluation sur le test set
-net.eval()
-correct = 0
-total = 0
-with torch.no_grad():
-    for inputs, targets in test_loader:
-        inputs, targets = inputs.to(device), targets.to(device)
-        outputs = net(inputs)
-        _, predicted = torch.max(outputs, 1)
-        total += targets.size(0)
-        correct += (predicted == targets).sum().item()
-test_acc = 100 * correct / total
-print(f"Test accuracy: {test_acc:.2f}%")
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16, shuffle=False)
 
-torch.save(net.state_dict(), "trained_model.pth")
+    dataiter = iter(train_loader)
+    images, labels = next(dataiter)
+
+    net = Net()
+    out = net(images)
+
+    # Entraînement du réseau
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    net = net.to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
+    epochs = 5
+
+    for epoch in range(epochs):
+        net.train()
+        running_loss = 0.0
+        for batch_idx, (inputs, targets) in enumerate(train_loader):
+            inputs, targets = inputs.to(device), targets.to(device)
+            optimizer.zero_grad()
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item() * inputs.size(0)
+            print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx+1}/{len(train_loader)} | Loss: {loss.item():.4f}")
+        epoch_loss = running_loss / len(train_loader.dataset)
+        print(f"[Epoch {epoch+1}] Loss moyen: {epoch_loss:.4f}")
+
+    # Évaluation sur le test set
+    net.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, targets in test_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = net(inputs)
+            _, predicted = torch.max(outputs, 1)
+            total += targets.size(0)
+            correct += (predicted == targets).sum().item()
+    test_acc = 100 * correct / total
+    print(f"Test accuracy: {test_acc:.2f}%")
+
+    torch.save(net.state_dict(), "trained_model.pth")

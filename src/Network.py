@@ -6,8 +6,8 @@ import torchvision.transforms as transforms
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-
 from PIL import Image
+from sklearn.metrics import recall_score
 
 class LimitImageSize:
     def __init__(self, max_size=3000):
@@ -88,10 +88,10 @@ if __name__ == "__main__":
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
  #       BoostRed(factor=1.0),
- #       AddColorFeatures(),
+        AddColorFeatures(),
         # Normaliser 6 canaux (3 RGB + 3 extras). Moyennes/std simples à 0.5
-        transforms.Normalize(mean=[0.5] * 3,
-                             std=[0.5] * 3)
+        transforms.Normalize(mean=[0.5] * 6,
+                             std=[0.5] * 6)
     ])
 
     dataset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'corrected_wildfires_dataset')
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     images, labels = next(dataiter)
 
     # On crée le modèle en tenant compte des 6 canaux produits par AddColorFeatures
-    net = Net(in_channels=3)
+    net = Net(in_channels=6)
     out = net(images)
 
     # Entraînement du réseau
@@ -116,7 +116,7 @@ if __name__ == "__main__":
     net = net.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
-    epochs = 5
+    epochs = 3
 
     for epoch in range(epochs):
         net.train()
@@ -133,19 +133,19 @@ if __name__ == "__main__":
         epoch_loss = running_loss / len(train_loader.dataset)
         print(f"[Epoch {epoch+1}] Loss moyen: {epoch_loss:.4f}")
 
-    # Évaluation sur le test set
+    # Évaluation sur le test set avec le recall
     net.eval()
-    correct = 0
-    total = 0
+    all_targets = []
+    all_preds = []
     with torch.no_grad():
         for inputs, targets in test_loader:
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = net(inputs)
             _, predicted = torch.max(outputs, 1)
-            total += targets.size(0)
-            correct += (predicted == targets).sum().item()
-    test_acc = 100 * correct / total
-    print(f"Test accuracy: {test_acc:.2f}%")
+            all_targets.extend(targets.cpu().numpy())
+            all_preds.extend(predicted.cpu().numpy())
+    recall = recall_score(all_targets, all_preds, average='macro')
+    print(f"Test recall (macro): {recall:.4f}")
 
     # Sauvegarde du modèle entraîné
-    torch.save(net.state_dict(), "trained_model2.pth")
+    #torch.save(net.state_dict(), "trained_model3.pth")

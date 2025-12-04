@@ -18,41 +18,65 @@ class LimitImageSize:
         return img
 
 
+class BoostRed:
+    def __init__(self, factor=2.0):
+        self.factor = factor
+
+    def __call__(self, img_tensor):
+        img_tensor = img_tensor.clone()
+        img_tensor[0] = img_tensor[0] * self.factor  # canal R amplifié
+        return img_tensor
+
+
+class AddColorFeatures:
+    def __init__(self, eps=1e-6):
+        self.eps = eps
+    def __call__(self, t):
+        # t: Tensor [3, H, W], values in [0,1]
+        R, G, B = t[0], t[1], t[2]
+        sumc = R + G + B + self.eps
+        norm_red = R / sumc                     # R / (R+G+B)
+        excess_red = torch.clamp(2*R - G - B, 0.0, 1.0)  # index simple
+        rg_diff = torch.clamp((R - G + 1.0) / 2.0, 0.0, 1.0)  # red vs green
+        extra = torch.stack([norm_red, excess_red, rg_diff], dim=0)
+        return torch.cat([t, extra], dim=0)  # shape [6,H,W]
+
+
 class Net(nn.Module):
+    def __init__(self, in_channels=6, num_classes=2):
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
 
-    def __init__(self):
-        super(Net, self).__init__()
-        ## Convolutional layers, where weights represent conv kernels
-        # 3 input image channel, 6 output channels, 3x3 square convolution
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=3)
-        # 6 input channels (the output of the last layer), 16 output channels, 3x3 square convolution
-        self.conv2 = nn.Conv2d(in_channels=6, out_channels=16, kernel_size=3)
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
 
-        ## Linear layer: MLP, i.e. fully-connected layer.
-        self.fc1 = nn.Linear(in_features = 52*52, out_features = 120)  # 6*6 from the image dimension, and 16 for the number of channels
-        self.fc2 = nn.Linear(in_features = 120, out_features = 84) # 120 is output of the previous layer.
-        self.fc3 = nn.Linear(in_features = 84, out_features = 2) # 84 is the output of the previous layer, 10 is the number of classes.
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+        )
+        # Global pooling -> fixe la taille de sortie quel que soit l'input
+        self.pool = nn.AdaptiveAvgPool2d((1,1))
+        self.classifier = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(128, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.4),
+            nn.Linear(64, num_classes)
+        )
 
     def forward(self, x):
-        # Conv1, then max pooling over a (4, 4) window
-        x = F.max_pool2d(F.relu(self.conv1(x)), 4)
-        # Conv2, then max pooling over a (4, 4) window
-        x = F.max_pool2d(F.relu(self.conv2(x)), 4) # If the size is a square you can only specify a single number
-        x = x.view(-1, self.num_flat_features(x)) # Reshape each image, processed by conv, into a vector (required for linear layers)
-        # 1st Linear layer
-        x = F.relu(self.fc1(x))
-        # 2nd Linear layer
-        x = F.relu(self.fc2(x))
-        # 3rd Linear layer
-        x = self.fc3(x)
+        x = self.features(x)
+        x = self.pool(x)           # shape (batch, 128, 1, 1)
+        x = x.view(x.size(0), -1)  # shape (batch, 128)
+        x = self.classifier(x)
         return x
-
-    def num_flat_features(self, x): # Computes the number of flat (*"vectorized"*) features from a 2D conv.
-        size = x.size()[1:]  # all dimensions except the batch dimension
-        num_features = 1
-        for s in size:
-            num_features *= s
-        return num_features
 
 
 if __name__ == "__main__":
@@ -63,8 +87,11 @@ if __name__ == "__main__":
         LimitImageSize(max_size=3000),
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5],
-                           std=[0.5, 0.5, 0.5])
+ #       BoostRed(factor=1.0),
+ #       AddColorFeatures(),
+        # Normaliser 6 canaux (3 RGB + 3 extras). Moyennes/std simples à 0.5
+        transforms.Normalize(mean=[0.5] * 3,
+                             std=[0.5] * 3)
     ])
 
     dataset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'corrected_wildfires_dataset')
@@ -80,7 +107,8 @@ if __name__ == "__main__":
     dataiter = iter(train_loader)
     images, labels = next(dataiter)
 
-    net = Net()
+    # On crée le modèle en tenant compte des 6 canaux produits par AddColorFeatures
+    net = Net(in_channels=3)
     out = net(images)
 
     # Entraînement du réseau
@@ -119,4 +147,5 @@ if __name__ == "__main__":
     test_acc = 100 * correct / total
     print(f"Test accuracy: {test_acc:.2f}%")
 
-    torch.save(net.state_dict(), "trained_model.pth")
+    # Sauvegarde du modèle entraîné
+    torch.save(net.state_dict(), "trained_model2.pth")

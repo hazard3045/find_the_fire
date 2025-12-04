@@ -10,17 +10,19 @@ from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
-from Network import Net
+from Network import Net, BoostRed, AddColorFeatures
 
 # Configuration
-MODEL_PATH = 'best_model.pth'  # or 'final_model.pth'
+MODEL_PATH = 'trained_model.pth'  # or 'final_model.pth'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Image preprocessing 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    BoostRed(factor=1.0),
+    AddColorFeatures(),
+    transforms.Normalize([0.5]*6, [0.5]*6)
 ])
 
 # dénormaliser les images pour la visualisation
@@ -39,9 +41,7 @@ def preprocess_image(img_path):
 
 
 def load_model(model_path):
-    model = Net()
-    model.fc3 = torch.nn.Linear(in_features=84, out_features=2)
-    
+    model = Net(in_channels=6)
     # Load trained weights
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path, map_location=DEVICE))
@@ -49,7 +49,6 @@ def load_model(model_path):
     else:
         print(f"⚠️  Model file not found: {model_path}")
         sys.exit(1)
-    
     model.to(DEVICE)
     model.eval()
     return model
@@ -58,7 +57,6 @@ def load_model(model_path):
 def generate_gradcam(model, img_tensor, img_array, target_class=None, save_path=None):
     """
     Generate Grad-CAM heatmap for the given image.
-    
     Args:
         model: The trained neural network
         img_tensor: Preprocessed image tensor for model input
@@ -66,8 +64,8 @@ def generate_gradcam(model, img_tensor, img_array, target_class=None, save_path=
         target_class: Class to visualize (0=fire, 1=nofire). If None, uses predicted class.
         save_path: Path to save the visualization. If None, displays instead.
     """
-    # la dernière couche de conv !!
-    target_layers = [model.conv2]
+    # Dernière couche de conv du nouveau modèle
+    target_layers = [model.features[8]]
     
     cam = GradCAM(model=model, target_layers=target_layers)
     
@@ -167,6 +165,7 @@ def batch_process_directory(model, input_dir, output_dir):
 def main():
     """Main function to demonstrate Grad-CAM visualization."""
     import argparse
+    import random
     
     parser = argparse.ArgumentParser(description='Generate Grad-CAM heatmaps for fire detection')
     parser.add_argument('--image', type=str, help='Path to a single image')
@@ -215,15 +214,16 @@ def main():
             output_dir = os.path.join('gradcam_output', class_name)
             os.makedirs(output_dir, exist_ok=True)
             
-            # Get first 5 images
-            images = [f for f in os.listdir(class_dir) 
-                     if f.lower().endswith(('.jpg', '.jpeg', '.png'))][:5]
-            
-            print(f"\nProcessing {len(images)} {class_name} samples...")
+            # Sélectionne 5 images aléatoires
+            all_images = [f for f in os.listdir(class_dir) 
+                         if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            images = random.sample(all_images, min(5, len(all_images)))
+
+            print(f"\nProcessing {len(images)} {class_name} samples (random)...")
             for img_file in images:
                 img_path = os.path.join(class_dir, img_file)
                 output_path = os.path.join(output_dir, f"gradcam_{img_file}")
-                
+
                 try:
                     img_tensor, img_array = preprocess_image(img_path)
                     predicted_class, confidence, _ = generate_gradcam(
@@ -233,7 +233,7 @@ def main():
                     print(f"  {img_file}: {class_names[predicted_class]} ({confidence:.2%})")
                 except Exception as e:
                     print(f"  ⚠️  Error: {e}")
-        
+
         print("\n✓ Demo complete! Check gradcam_output/fire/ directory for results.")
 
 
